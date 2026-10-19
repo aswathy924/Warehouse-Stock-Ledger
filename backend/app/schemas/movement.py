@@ -1,4 +1,5 @@
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -64,6 +65,7 @@ class MovementResponse(BaseModel):
     unit_cost: Decimal
     reason: str | None
     reference: str | None
+    created_at: datetime | None = None
     created_by: str
     reverses_movement_id: int | None
     is_reversed: bool = False

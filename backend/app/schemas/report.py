@@ -61,3 +61,19 @@ class ReconcileResponse(BaseModel):
     drift_detected: bool
     total_records_checked: int
     drifts: list[ReconcileDriftItem]
+
+
+class StockOverviewGridItem(BaseModel):
+    product_id: int
+    sku: str
+    product_name: str
+    unit: str
+    location_id: int
+    bin_code: str
+    location_description: str
+    quantity: Decimal
+    unit_cost: Decimal
+    total_value: Decimal
+
+    model_config = ConfigDict(from_attributes=True)
+

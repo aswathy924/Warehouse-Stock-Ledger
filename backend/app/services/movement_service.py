@@ -442,3 +442,111 @@ def reconcile_stock_ledger(db: Session) -> dict:
         "total_records_checked": total_records,
         "drifts": drifts,
     }
+
+
+def list_movements(
+    db: Session,
+    product_id: int | None = None,
+    location_id: int | None = None,
+    movement_type: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+
+    query = select(Movement)
+    if product_id is not None:
+        query = query.where(Movement.product_id == product_id)
+    if location_id is not None:
+        query = query.where((Movement.from_location_id == location_id) | (Movement.to_location_id == location_id))
+    if movement_type is not None:
+        query = query.where(Movement.movement_type == movement_type)
+
+    query = query.order_by(Movement.created_at.desc(), Movement.id.desc()).offset(offset).limit(limit)
+    movements = db.scalars(query).all()
+
+    reversed_ids = set(db.scalars(select(Movement.reverses_movement_id).where(Movement.reverses_movement_id.is_not(None))).all())
+
+    results = []
+    for m in movements:
+        results.append({
+            "id": m.id,
+            "movement_type": m.movement_type,
+            "product_id": m.product_id,
+            "from_location_id": m.from_location_id,
+            "to_location_id": m.to_location_id,
+            "quantity": m.quantity,
+            "unit_cost": m.unit_cost,
+            "reason": m.reason,
+            "reference": m.reference,
+            "created_at": m.created_at,
+            "created_by": m.created_by,
+            "reverses_movement_id": m.reverses_movement_id,
+            "is_reversed": m.id in reversed_ids,
+        })
+    return results
+
+
+def get_movement_by_id(
+    movement_id: int,
+    db: Session
+) -> dict | None:
+    
+    m = db.get(Movement, movement_id)
+    if m is None:
+        return None
+
+    is_reversed = db.scalar(select(Movement.id).where(Movement.reverses_movement_id == m.id)) is not None
+
+    return {
+        "id": m.id,
+        "movement_type": m.movement_type,
+        "product_id": m.product_id,
+        "from_location_id": m.from_location_id,
+        "to_location_id": m.to_location_id,
+        "quantity": m.quantity,
+        "unit_cost": m.unit_cost,
+        "reason": m.reason,
+        "reference": m.reference,
+        "created_at": m.created_at,
+        "created_by": m.created_by,
+        "reverses_movement_id": m.reverses_movement_id,
+        "is_reversed": is_reversed,
+    }
+
+
+def get_stock_overview_grid(
+    db: Session,
+    product_id: int | None = None,
+    location_id: int | None = None,
+) -> list[dict]:
+
+    prod_query = select(Product).order_by(Product.id)
+    if product_id is not None:
+        prod_query = prod_query.where(Product.id == product_id)
+    products = db.scalars(prod_query).all()
+
+    loc_query = select(Location).order_by(Location.id)
+    if location_id is not None:
+        loc_query = loc_query.where(Location.id == location_id)
+    locations = db.scalars(loc_query).all()
+
+    grid = []
+    for p in products:
+        avg_cost = calculate_product_weighted_average_cost(p.id, db)
+        for loc in locations:
+            qty = get_stock_balance(p.id, loc.id, db)
+            val = (qty * avg_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            grid.append({
+                "product_id": p.id,
+                "sku": p.sku,
+                "product_name": p.name,
+                "unit": p.unit,
+                "location_id": loc.id,
+                "bin_code": loc.bin_code,
+                "location_description": loc.description,
+                "quantity": qty,
+                "unit_cost": avg_cost,
+                "total_value": val,
+            })
+    return grid
+
