@@ -486,3 +486,92 @@ def test_reconcile_consistent_ledger(db_session):
     assert res["status"] == "consistent"
     assert res["drift_detected"] is False
     assert res["total_records_checked"] == 2
+
+
+def test_concurrent_outs_racing_for_units():
+    import concurrent.futures
+
+    test_engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    TestingSession = sessionmaker(bind=test_engine, autoflush=False, expire_on_commit=False)
+    Base.metadata.create_all(bind=test_engine)
+
+    init_db = TestingSession()
+    p = Product(sku="SKU-RACE", name="Race Rice", unit="kg", reorder_level=5)
+    l1 = Location(bin_code="BIN-RACE", description="Race Bin")
+    init_db.add_all([p, l1])
+    init_db.commit()
+    prod_id = p.id
+    loc_id = l1.id
+
+    movement_service.stock_in(
+        StockInRequest(
+            product_id=prod_id,
+            to_location_id=loc_id,
+            quantity=Decimal("10.000"),
+            unit_cost=Decimal("20.00"),
+            created_by="alice",
+        ),
+        init_db,
+    )
+    init_db.close()
+
+    def try_dispatch(worker_id):
+        worker_db = TestingSession()
+        try:
+            m = movement_service.stock_out(
+                StockOutRequest(
+                    product_id=prod_id,
+                    from_location_id=loc_id,
+                    quantity=Decimal("7.000"),
+                    reference=f"RACE-{worker_id}",
+                    created_by=f"worker_{worker_id}",
+                ),
+                worker_db,
+            )
+            return ("SUCCESS", m.id)
+        except ValueError as err:
+            return ("FAILED", str(err))
+        finally:
+            worker_db.close()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f1 = executor.submit(try_dispatch, 1)
+        f2 = executor.submit(try_dispatch, 2)
+        results = [f1.result(), f2.result()]
+
+    statuses = [r[0] for r in results]
+    assert "SUCCESS" in statuses
+    assert "FAILED" in statuses
+
+    verify_db = TestingSession()
+    final_balance = movement_service.get_stock_balance(prod_id, loc_id, verify_db)
+    verify_db.close()
+    assert final_balance == Decimal("3.000")
+
+
+
+def test_reconcile_detects_drift_when_ledger_corrupted(db_session):
+    p, l1, _ = setup_sample_data(db_session)
+
+    corrupt_m = Movement(
+        movement_type="OUT",
+        product_id=p.id,
+        from_location_id=l1.id,
+        to_location_id=None,
+        quantity=Decimal("15.000"),
+        unit_cost=Decimal("0.00"),
+        created_by="hacker",
+    )
+    db_session.add(corrupt_m)
+    db_session.commit()
+
+    res = movement_service.reconcile_stock_ledger(db_session)
+    assert res["status"] == "drift_detected"
+    assert res["drift_detected"] is True
+    assert len(res["drifts"]) >= 1
+    assert res["drifts"][0]["product_id"] == p.id
+
