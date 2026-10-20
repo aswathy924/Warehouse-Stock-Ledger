@@ -3,6 +3,7 @@ import { api } from './services/api';
 import { StockOverview } from './components/StockOverview';
 import { RecordMovement } from './components/RecordMovement';
 import { LedgerHistory } from './components/LedgerHistory';
+import { ReportsAudit } from './components/ReportsAudit';
 import './index.css';
 
 export type NavTab = 'grid' | 'movement' | 'ledger' | 'reports';
@@ -22,6 +23,7 @@ const getInitialTab = (): NavTab => {
 export function App() {
   const [activeTab, setActiveTab] = useState<NavTab>(getInitialTab);
   const [ledgerProductId, setLedgerProductId] = useState<number | undefined>(undefined);
+  const [movementProductId, setMovementProductId] = useState<number | undefined>(undefined);
   const [isOnline, setIsOnline] = useState<boolean | null>(null);
 
   const handleTabChange = (tab: NavTab) => {
@@ -114,16 +116,22 @@ export function App() {
           />
         )}
 
-        {activeTab === 'movement' && <RecordMovement />}
+        {activeTab === 'movement' && (
+          <RecordMovement
+            initialProductId={movementProductId}
+            initialType="IN"
+          />
+        )}
 
         {activeTab === 'ledger' && <LedgerHistory initialProductId={ledgerProductId} />}
 
         {activeTab === 'reports' && (
-          <div className="card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-            <h2 style={{ fontSize: '1.1rem', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
-              Reports & Audit
-            </h2>
-          </div>
+          <ReportsAudit
+            onRestockProduct={(id) => {
+              setMovementProductId(id);
+              handleTabChange('movement');
+            }}
+          />
         )}
       </main>
     </div>

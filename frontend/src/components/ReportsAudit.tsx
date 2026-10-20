@@ -2,16 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import type { LowStockItem, ValuationReport, ReconcileResponse } from '../types';
 import { formatCurrencyINR, formatQuantity } from '../utils/formatters';
-import {
-  IconRefresh,
-  IconShieldCheck,
-  IconAlertTriangle,
-  IconTrendingUp,
-  IconActivity,
-} from './Icons';
 
 interface ReportsAuditProps {
-  onRestockProduct: (productId: number) => void;
+  onRestockProduct?: (productId: number) => void;
 }
 
 export const ReportsAudit: React.FC<ReportsAuditProps> = ({ onRestockProduct }) => {
@@ -50,8 +43,8 @@ export const ReportsAudit: React.FC<ReportsAuditProps> = ({ onRestockProduct }) 
       setReconcileResult(res);
       setAuditSuccessMsg(
         res.drift_detected
-          ? 'Audit complete: Ledger drift detected! Review discrepancies below.'
-          : `Audit complete: All ${res.total_records_checked} product-bin balances verified with zero drift.`
+          ? 'Ledger drift detected. Please inspect the discrepancy table below.'
+          : `Audit passed: All ${res.total_records_checked} product-bin records verified with zero drift.`
       );
     } catch (err: any) {
       setErrorMsg(err.message || 'Ledger audit verification failed');
@@ -68,320 +61,247 @@ export const ReportsAudit: React.FC<ReportsAuditProps> = ({ onRestockProduct }) 
 
   return (
     <div>
-      {/* KPI Deck */}
-      <div className="kpi-deck">
-        <div className="kpi-card">
-          <span className="label">Total Asset Valuation</span>
-          <span className="value mono">{formatCurrencyINR(valuation?.total_warehouse_value || '0')}</span>
-          <span className="subtext">Weighted-average cost (WAC) basis</span>
+      <div className="page-header">
+        <div className="page-title">
+          <h1>Reports & Audit</h1>
         </div>
-        <div className="kpi-card" style={lowStock.length > 0 ? { borderColor: 'var(--status-adjust-border)' } : {}}>
-          <span className="label" style={lowStock.length > 0 ? { color: 'var(--status-adjust)' } : {}}>
-            Reorder Level Deficits
-          </span>
-          <span className="value mono" style={lowStock.length > 0 ? { color: 'var(--status-adjust)' } : {}}>
-            {lowStock.length}
-          </span>
-          <span className="subtext">SKUs needing immediate PO placement</span>
-        </div>
-        <div className="kpi-card">
-          <span className="label">Audit Integrity State</span>
-          <span className="value" style={{ fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--status-in)' }}>
-            <IconShieldCheck size={20} />
-            <span>Immutable</span>
-          </span>
-          <span className="subtext">Strict append-only event sourcing</span>
-        </div>
-        <div className="kpi-card">
-          <span className="label">Valued SKU Count</span>
-          <span className="value mono">{valuation?.items.length || 0}</span>
-          <span className="subtext">Active items in valuation register</span>
+
+        <div className="toolbar">
+          <button className="btn" onClick={fetchReports} disabled={loading}>
+            Refresh Reports
+          </button>
         </div>
       </div>
 
       {errorMsg && (
-        <div style={{ marginBottom: '1.5rem' }}>
-          <div className="alert-banner alert-error">
-            <span>{errorMsg}</span>
-          </div>
+        <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
+          {errorMsg}
         </div>
       )}
 
-      {auditSuccessMsg && (
-        <div style={{ marginBottom: '1.5rem' }}>
-          <div className={`alert-banner ${reconcileResult?.drift_detected ? 'alert-warning' : 'alert-success'}`}>
-            <span>{auditSuccessMsg}</span>
-          </div>
-        </div>
-      )}
+      {/* 1. Low Stock Alerts */}
+      <div style={{ marginBottom: '2rem' }}>
+        <h2 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.75rem' }}>
+          Low-Stock Reorder Alerts
+        </h2>
 
-      {/* Grid of Sections: Reorder Alerts + Ledger Integrity Audit */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.5rem', marginBottom: '1.75rem' }}>
-        
-        {/* Reorder Alerts Card */}
-        <div className="panel">
-          <div className="panel-header">
-            <div className="panel-title">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <IconAlertTriangle size={18} style={{ color: 'var(--status-adjust)' }} />
-                <h3>Low-Stock Reorder Queue</h3>
-              </div>
-              <p>Products where aggregate warehouse balance is ≤ threshold</p>
+        <div className="card">
+          {loading ? (
+            <div className="empty-state">Checking stock thresholds...</div>
+          ) : lowStock.length === 0 ? (
+            <div className="empty-state">
+              All inventory items are currently above their configured reorder thresholds.
             </div>
-            <button className="btn btn-outline" onClick={fetchReports} disabled={loading}>
-              <IconRefresh size={14} />
-            </button>
-          </div>
+          ) : (
+            <div className="table-responsive">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>SKU</th>
+                    <th>Product Name</th>
+                    <th className="text-right">Current Stock</th>
+                    <th className="text-right">Reorder Threshold</th>
+                    <th className="text-right">Deficit</th>
+                    {onRestockProduct && <th className="text-center">Action</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {lowStock.map((item) => {
+                    const current = parseFloat(item.current_stock);
+                    const deficit = Math.max(0, item.reorder_level - current);
 
-          <div className="panel-body">
-            {loading ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-                Checking reorder levels...
-              </div>
-            ) : lowStock.length === 0 ? (
-              <div style={{ padding: '2.5rem 1.5rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                <IconShieldCheck size={32} style={{ color: 'var(--status-in)', margin: '0 auto 0.75rem auto', display: 'block' }} />
-                <div style={{ fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.25rem' }}>
-                  Healthy Inventory Levels
-                </div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                  All stocked SKUs are currently operating above their configured reorder thresholds.
-                </div>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                {lowStock.map((item) => {
-                  const current = parseFloat(item.current_stock);
-                  const deficit = Math.max(0, item.reorder_level - current);
+                    return (
+                      <tr key={item.product_id}>
+                        <td>
+                          <span className="tag">{item.sku}</span>
+                        </td>
+                        <td style={{ fontWeight: 500 }}>{item.name}</td>
+                        <td className="text-right mono" style={{ color: 'var(--danger)', fontWeight: 600 }}>
+                          {formatQuantity(item.current_stock, item.unit)}
+                        </td>
+                        <td className="text-right mono">
+                          {item.reorder_level} {item.unit}
+                        </td>
+                        <td className="text-right mono" style={{ color: 'var(--danger)', fontWeight: 600 }}>
+                          -{deficit} {item.unit}
+                        </td>
+                        {onRestockProduct && (
+                          <td className="text-center">
+                            <button
+                              className="btn btn-primary"
+                              style={{ height: '28px', padding: '0 0.6rem', fontSize: '0.75rem' }}
+                              onClick={() => onRestockProduct(item.product_id)}
+                            >
+                              + Restock
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
 
-                  return (
-                    <div
-                      key={item.product_id}
-                      style={{
-                        padding: '0.875rem 1rem',
-                        backgroundColor: 'var(--bg-surface-elevated)',
-                        borderRadius: '6px',
-                        border: '1px solid var(--border-subtle)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                      }}
-                    >
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                          <span className="chip chip-normal mono">{item.sku}</span>
-                          <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{item.name}</span>
-                        </div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                          Available: <strong className="mono" style={{ color: 'var(--status-adjust)' }}>{formatQuantity(item.current_stock, item.unit)}</strong> | Reorder Threshold: <span className="mono">{item.reorder_level} {item.unit}</span>
-                          {deficit > 0 && (
-                            <span style={{ color: 'var(--status-danger)', marginLeft: '0.5rem' }}>
-                              (Deficit: -{deficit} {item.unit})
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <button
-                        className="btn btn-outline"
-                        style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
-                        onClick={() => onRestockProduct(item.product_id)}
-                      >
-                        + Restock
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+      {/* 2. Inventory Valuation Register (WAC) */}
+      <div style={{ marginBottom: '2rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+          <h2 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+            Inventory Valuation Register (WAC)
+          </h2>
+          {valuation && (
+            <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+              Total Warehouse Value: <strong style={{ color: 'var(--text-primary)' }}>{formatCurrencyINR(valuation.total_warehouse_value)}</strong>
+            </span>
+          )}
         </div>
 
-        {/* Ledger Integrity & Drift Audit Panel */}
-        <div className="panel">
-          <div className="panel-header">
-            <div className="panel-title">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <IconActivity size={18} style={{ color: 'var(--brand-blue)' }} />
-                <h3>Ledger Integrity & Reconciliation Audit</h3>
+        <div className="card">
+          <div className="table-responsive">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>SKU</th>
+                  <th>Product Name</th>
+                  <th className="text-right">Total Quantity</th>
+                  <th className="text-right">Weighted Avg Cost (WAC)</th>
+                  <th className="text-right">Total Value</th>
+                  <th className="text-right">Share of Portfolio</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td colSpan={6} className="empty-state">
+                      Calculating valuation register...
+                    </td>
+                  </tr>
+                ) : !valuation || valuation.items.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="empty-state">
+                      No valuation data available. Record stock receipts to establish cost basis.
+                    </td>
+                  </tr>
+                ) : (
+                  valuation.items.map((item) => {
+                    const itemValue = parseFloat(item.total_value || '0');
+                    const sharePct = totalWarehouseVal > 0 ? (itemValue / totalWarehouseVal) * 100 : 0;
+
+                    return (
+                      <tr key={item.product_id}>
+                        <td>
+                          <span className="tag">{item.sku}</span>
+                        </td>
+                        <td style={{ fontWeight: 500 }}>{item.name}</td>
+                        <td className="text-right mono" style={{ fontWeight: 600 }}>
+                          {formatQuantity(item.total_quantity, item.unit)}
+                        </td>
+                        <td className="text-right mono">
+                          {formatCurrencyINR(item.average_cost)}
+                        </td>
+                        <td className="text-right mono" style={{ fontWeight: 600 }}>
+                          {formatCurrencyINR(item.total_value)}
+                        </td>
+                        <td className="text-right mono" style={{ color: 'var(--text-secondary)' }}>
+                          {sharePct.toFixed(1)}%
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+              {!loading && valuation && valuation.items.length > 0 && (
+                <tfoot>
+                  <tr>
+                    <td colSpan={2}>Total ({valuation.items.length} products)</td>
+                    <td className="text-right mono">
+                      {valuation.items
+                        .reduce((sum, i) => sum + parseFloat(i.total_quantity || '0'), 0)
+                        .toLocaleString('en-IN', { maximumFractionDigits: 1 })}
+                    </td>
+                    <td className="text-right">—</td>
+                    <td className="text-right mono">
+                      {formatCurrencyINR(valuation.total_warehouse_value)}
+                    </td>
+                    <td className="text-right mono">100.0%</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Ledger Reconciliation & Drift Audit */}
+      <div>
+        <h2 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.75rem' }}>
+          Ledger Integrity & Reconciliation Audit
+        </h2>
+
+        <div className="card" style={{ padding: '1.5rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
+                Ledger Drift Detection
               </div>
-              <p>Verify that derived balances strictly match chronological movement sums</p>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                Verifies that derived inventory balances across all storage bins strictly match chronological transaction sums.
+              </div>
             </div>
+
             <button
               className="btn btn-primary"
               onClick={handleRunReconcile}
               disabled={auditRunning}
             >
-              {auditRunning ? 'Auditing...' : 'Run Audit'}
+              {auditRunning ? 'Running Audit...' : 'Run Audit Check'}
             </button>
           </div>
 
-          <div className="panel-body">
-            <div style={{ padding: '1rem', backgroundColor: 'var(--bg-surface-elevated)', borderRadius: '6px', border: '1px solid var(--border-subtle)', marginBottom: '1rem' }}>
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                In this event-sourced architecture, product balances in specific bin locations are derived purely from append-only ledger entries.
-                Running this audit checks every product-bin pair across the entire database for unrecorded drift or negative balance violations.
-              </div>
+          {auditSuccessMsg && (
+            <div
+              className={`alert ${reconcileResult?.drift_detected ? 'alert-error' : 'alert-success'}`}
+              style={{ marginBottom: '1rem' }}
+            >
+              {auditSuccessMsg}
             </div>
+          )}
 
-            {reconcileResult && (
-              <div>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.75rem',
-                    padding: '0.875rem 1rem',
-                    borderRadius: '6px',
-                    backgroundColor: reconcileResult.drift_detected ? 'var(--status-danger-bg)' : 'var(--status-in-bg)',
-                    border: `1px solid ${reconcileResult.drift_detected ? 'var(--status-danger-border)' : 'var(--status-in-border)'}`,
-                  }}
-                >
-                  {reconcileResult.drift_detected ? (
-                    <IconAlertTriangle size={20} style={{ color: 'var(--status-danger)' }} />
-                  ) : (
-                    <IconShieldCheck size={20} style={{ color: 'var(--status-in)' }} />
-                  )}
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-main)' }}>
-                      {reconcileResult.drift_detected
-                        ? 'Ledger Discrepancy Found'
-                        : 'Audit Verified: 100% Ledger Consistency'}
-                    </div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                      {reconcileResult.total_records_checked} product-location combinations verified against chronological transactions.
-                    </div>
-                  </div>
-                </div>
-
-                {reconcileResult.drifts && reconcileResult.drifts.length > 0 && (
-                  <div style={{ marginTop: '1rem' }}>
-                    <div className="table-container">
-                      <table className="data-table">
-                        <thead>
-                          <tr>
-                            <th>SKU</th>
-                            <th>Bin</th>
-                            <th style={{ textAlign: 'right' }}>Expected</th>
-                            <th style={{ textAlign: 'right' }}>Actual</th>
-                            <th style={{ textAlign: 'right' }}>Drift</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {reconcileResult.drifts.map((d, i) => (
-                            <tr key={i}>
-                              <td className="mono">{d.sku}</td>
-                              <td className="mono">{d.bin_code}</td>
-                              <td style={{ textAlign: 'right' }} className="mono">{d.expected_balance}</td>
-                              <td style={{ textAlign: 'right' }} className="mono">{d.actual_balance}</td>
-                              <td style={{ textAlign: 'right', color: 'var(--status-danger)' }} className="mono">{d.drift}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-      </div>
-
-      {/* Product Valuation Register (WAC) */}
-      <div className="panel">
-        <div className="panel-header">
-          <div className="panel-title">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <IconTrendingUp size={18} style={{ color: 'var(--brand-blue)' }} />
-              <h3>Inventory Valuation Register (WAC)</h3>
-            </div>
-            <p>Weighted-Average Costing dynamically adjusted on every inward stock receipt</p>
-          </div>
-          <button className="btn btn-outline" onClick={fetchReports} disabled={loading}>
-            <IconRefresh size={14} />
-          </button>
-        </div>
-
-        <div className="table-container">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Product SKU</th>
-                <th>Item Name</th>
-                <th style={{ textAlign: 'right' }}>Aggregated Quantity</th>
-                <th style={{ textAlign: 'right' }}>Weighted Avg Cost</th>
-                <th style={{ textAlign: 'right' }}>Total Inventory Asset Value</th>
-                <th style={{ textAlign: 'right' }}>Share of Capital</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-                    Calculating valuation register...
-                  </td>
-                </tr>
-              ) : !valuation || valuation.items.length === 0 ? (
-                <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-                    No valuation data available. Record stock receipts to establish weighted average unit costs.
-                  </td>
-                </tr>
-              ) : (
-                valuation.items.map((item) => {
-                  const itemValue = parseFloat(item.total_value || '0');
-                  const sharePct = totalWarehouseVal > 0 ? (itemValue / totalWarehouseVal) * 100 : 0;
-
-                  return (
-                    <tr key={item.product_id}>
+          {reconcileResult && reconcileResult.drifts && reconcileResult.drifts.length > 0 && (
+            <div className="table-responsive" style={{ marginTop: '1rem' }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>SKU</th>
+                    <th>Bin Location</th>
+                    <th className="text-right">Expected Balance</th>
+                    <th className="text-right">Actual Balance</th>
+                    <th className="text-right">Drift</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reconcileResult.drifts.map((d, i) => (
+                    <tr key={i}>
                       <td>
-                        <span className="chip chip-normal mono">{item.sku}</span>
+                        <span className="tag">{d.sku}</span>
                       </td>
-                      <td className="font-medium">{item.name}</td>
-                      <td style={{ textAlign: 'right' }} className="mono font-medium">
-                        {formatQuantity(item.total_quantity, item.unit)}
+                      <td>
+                        <span className="tag tag-bin">{d.bin_code}</span>
                       </td>
-                      <td style={{ textAlign: 'right' }} className="mono">
-                        {formatCurrencyINR(item.average_cost)}
-                      </td>
-                      <td style={{ textAlign: 'right' }} className="mono font-medium">
-                        {formatCurrencyINR(item.total_value)}
-                      </td>
-                      <td style={{ textAlign: 'right' }} className="mono">
-                        <span style={{ color: sharePct > 20 ? 'var(--brand-blue)' : 'var(--text-secondary)' }}>
-                          {sharePct.toFixed(1)}%
-                        </span>
+                      <td className="text-right mono">{d.expected_balance}</td>
+                      <td className="text-right mono">{d.actual_balance}</td>
+                      <td className="text-right mono" style={{ color: 'var(--danger)', fontWeight: 600 }}>
+                        {d.drift}
                       </td>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
-            {valuation && valuation.items.length > 0 && (
-              <tfoot>
-                <tr style={{ backgroundColor: 'var(--bg-surface-elevated)', fontWeight: 600 }}>
-                  <td colSpan={2} style={{ padding: '1rem 1.25rem' }}>
-                    Total Portfolio Valuation
-                  </td>
-                  <td style={{ textAlign: 'right', padding: '1rem 1.25rem' }} className="mono">
-                    {valuation.items
-                      .reduce((sum, i) => sum + parseFloat(i.total_quantity || '0'), 0)
-                      .toLocaleString('en-IN', { maximumFractionDigits: 1 })}{' '}
-                    units
-                  </td>
-                  <td style={{ textAlign: 'right', padding: '1rem 1.25rem', color: 'var(--text-muted)' }}>—</td>
-                  <td style={{ textAlign: 'right', padding: '1rem 1.25rem', color: 'var(--text-main)', fontSize: '1rem' }} className="mono">
-                    {formatCurrencyINR(valuation.total_warehouse_value)}
-                  </td>
-                  <td style={{ textAlign: 'right', padding: '1rem 1.25rem' }} className="mono">
-                    100.0%
-                  </td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </div>
