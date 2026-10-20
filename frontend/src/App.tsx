@@ -27,6 +27,9 @@ export function App() {
   const [isOnline, setIsOnline] = useState<boolean | null>(null);
 
   const handleTabChange = (tab: NavTab) => {
+    if (tab === 'ledger') {
+      setLedgerProductId(undefined);
+    }
     setActiveTab(tab);
     window.location.hash = tab;
     localStorage.setItem('active_tab', tab);
@@ -105,13 +108,27 @@ export function App() {
         </div>
       </header>
 
+      {/* Offline warning banner — shown prominently when API unreachable */}
+      {isOnline === false && (
+        <div className="offline-banner" role="alert">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          <strong>Backend API is unreachable.</strong>&nbsp;Check that the FastAPI server is running on port 8000. Changes cannot be saved while offline.
+        </div>
+      )}
+
       {/* Main Content Area */}
       <main className="container">
         {activeTab === 'grid' && (
           <StockOverview
             onSelectProduct={(id) => {
               setLedgerProductId(id);
-              handleTabChange('ledger');
+              setActiveTab('ledger');
+              window.location.hash = 'ledger';
+              localStorage.setItem('active_tab', 'ledger');
             }}
           />
         )}
@@ -120,6 +137,12 @@ export function App() {
           <RecordMovement
             initialProductId={movementProductId}
             initialType="IN"
+            onViewLedger={(id) => {
+              setLedgerProductId(id);
+              setActiveTab('ledger');
+              window.location.hash = 'ledger';
+              localStorage.setItem('active_tab', 'ledger');
+            }}
           />
         )}
 

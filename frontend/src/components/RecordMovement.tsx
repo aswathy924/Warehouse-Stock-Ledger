@@ -11,15 +11,18 @@ import { IconInfo } from './Icons';
 
 interface RecordMovementProps {
   onSuccess?: () => void;
+  onViewLedger?: (productId: number) => void;
   initialProductId?: number;
   initialType?: MovementType;
 }
 
 export const RecordMovement: React.FC<RecordMovementProps> = ({
   onSuccess,
+  onViewLedger,
   initialProductId,
   initialType,
 }) => {
+  const [lastPostedProductId, setLastPostedProductId] = React.useState<number | null>(null);
   const [movementType, setMovementType] = useState<MovementType>(initialType || 'IN');
   const [products, setProducts] = useState<Product[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
@@ -194,11 +197,12 @@ export const RecordMovement: React.FC<RecordMovementProps> = ({
         });
       }
 
+      setLastPostedProductId(productId);
       setSuccessMsg(
-        `Movement #${createdMovement?.id} successfully recorded (${createdMovement?.movement_type}: ${formatQuantity(
+        `Movement #${createdMovement?.id} recorded — ${createdMovement?.movement_type} · ${formatQuantity(
           createdMovement?.quantity,
           selectedProduct?.unit
-        )})`
+        )} of [${selectedProduct?.sku}] ${selectedProduct?.name}`
       );
       setProductId(0);
       setFromLocationId(0);
@@ -243,7 +247,7 @@ export const RecordMovement: React.FC<RecordMovementProps> = ({
 
       <div className="card">
         {/* Operation Type Switcher */}
-        <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--border)', display: 'flex', gap: '0.5rem', backgroundColor: '#f8fafc' }}>
+        <div className="type-switcher" style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--border)', backgroundColor: '#f8fafc', display: 'flex', gap: '0.5rem' }}>
           {(['IN', 'OUT', 'TRANSFER', 'ADJUSTMENT'] as MovementType[]).map((type) => {
             const isActive = movementType === type;
             return (
@@ -265,7 +269,21 @@ export const RecordMovement: React.FC<RecordMovementProps> = ({
 
         <form onSubmit={handleSubmit} style={{ padding: '1.5rem' }}>
           {errorMsg && <div className="alert alert-error">{errorMsg}</div>}
-          {successMsg && <div className="alert alert-success">{successMsg}</div>}
+          {successMsg && (
+            <div className="alert alert-success" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+              <span>{successMsg}</span>
+              {onViewLedger && lastPostedProductId && (
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ flexShrink: 0, height: '30px', padding: '0 0.7rem', fontSize: '0.8rem', background: 'rgba(0,0,0,0.06)', border: '1px solid rgba(0,0,0,0.12)' }}
+                  onClick={() => onViewLedger(lastPostedProductId)}
+                >
+                  View in Ledger →
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Product Selector */}
           <div className="form-group">
