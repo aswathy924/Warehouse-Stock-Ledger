@@ -7,9 +7,10 @@ import type {
   AdjustmentReason,
 } from '../types';
 import { formatQuantity } from '../utils/formatters';
+import { IconInfo } from './Icons';
 
 interface RecordMovementProps {
-  onSuccess: () => void;
+  onSuccess?: () => void;
   initialProductId?: number;
   initialType?: MovementType;
 }
@@ -23,58 +24,53 @@ export const RecordMovement: React.FC<RecordMovementProps> = ({
   const [products, setProducts] = useState<Product[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
 
-  // Form states
+  // Form inputs
   const [productId, setProductId] = useState<number>(initialProductId || 0);
   const [fromLocationId, setFromLocationId] = useState<number>(0);
   const [toLocationId, setToLocationId] = useState<number>(0);
   const [locationId, setLocationId] = useState<number>(0);
   const [quantity, setQuantity] = useState<string>('');
   const [unitCost, setUnitCost] = useState<string>('');
-  const [reason, setReason] = useState<AdjustmentReason>('damaged');
+  const [reason, setReason] = useState<AdjustmentReason | ''>('');
   const [reference, setReference] = useState<string>('');
-  const [createdBy, setCreatedBy] = useState<string>('operator_1');
+  const [createdBy, setCreatedBy] = useState<string>('');
 
-  // Available balance indicator
+  // Available stock balance
   const [availableStock, setAvailableStock] = useState<string | null>(null);
+  const [loadingBalance, setLoadingBalance] = useState<boolean>(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (initialType) setMovementType(initialType);
-    if (initialProductId) setProductId(initialProductId);
-  }, [initialType, initialProductId]);
-
+  // Load products and locations
   useEffect(() => {
     const loadMetadata = async () => {
       try {
         const [prods, locs] = await Promise.all([api.getProducts(), api.getLocations()]);
         setProducts(prods);
         setLocations(locs);
-        if (prods.length > 0 && !initialProductId) setProductId(prods[0].id);
-        if (locs.length > 0) {
-          setToLocationId(locs[0].id);
-          setFromLocationId(locs[0].id);
-          setLocationId(locs[0].id);
-        }
+        if (initialProductId) setProductId(initialProductId);
       } catch (err: any) {
-        setErrorMsg(err.message || 'Failed to load master metadata');
+        setErrorMsg(err.message || 'Failed to load master products and locations');
       }
     };
     loadMetadata();
-  }, []);
+  }, [initialProductId]);
 
-  // Fetch available balance when product or fromLocation changes
+  // Query live available balance whenever product or source location changes
   useEffect(() => {
     const checkBalance = async () => {
       const loc = movementType === 'ADJUSTMENT' ? locationId : fromLocationId;
-      if (productId > 0 && loc > 0 && (movementType === 'OUT' || movementType === 'TRANSFER' || movementType === 'ADJUSTMENT')) {
+      if (productId > 0 && loc > 0 && movementType !== 'IN') {
+        setLoadingBalance(true);
         try {
           const res = await api.getBalance(productId, loc);
           setAvailableStock(res.quantity);
         } catch {
           setAvailableStock(null);
+        } finally {
+          setLoadingBalance(false);
         }
       } else {
         setAvailableStock(null);
@@ -90,6 +86,51 @@ export const RecordMovement: React.FC<RecordMovementProps> = ({
     setErrorMsg(null);
     setSuccessMsg(null);
 
+    if (!productId) {
+      setErrorMsg('Please select a product');
+      return;
+    }
+
+    if (movementType === 'IN' && !toLocationId) {
+      setErrorMsg('Please select a destination bin');
+      return;
+    }
+
+    if (movementType === 'OUT' && !fromLocationId) {
+      setErrorMsg('Please select a source bin');
+      return;
+    }
+
+    if (movementType === 'TRANSFER') {
+      if (!fromLocationId) {
+        setErrorMsg('Please select a source bin');
+        return;
+      }
+      if (!toLocationId) {
+        setErrorMsg('Please select a destination bin');
+        return;
+      }
+      if (fromLocationId === toLocationId) {
+        setErrorMsg('Source location and destination location must be different');
+        return;
+      }
+    }
+
+    if (movementType === 'ADJUSTMENT') {
+      if (!locationId) {
+        setErrorMsg('Please select a storage location');
+        return;
+      }
+      if (!reason) {
+        setErrorMsg('Please select an adjustment reason');
+        return;
+      }
+      if (reason === 'other-with-note' && !reference.trim()) {
+        setErrorMsg('A reference note is required when reason code is "other-with-note"');
+        return;
+      }
+    }
+
     const parsedQty = parseFloat(quantity);
     if (isNaN(parsedQty) || parsedQty === 0) {
       setErrorMsg('Quantity must be a valid non-zero number');
@@ -101,17 +142,19 @@ export const RecordMovement: React.FC<RecordMovementProps> = ({
       return;
     }
 
-    if (movementType === 'TRANSFER' && fromLocationId === toLocationId) {
-      setErrorMsg('Source and destination locations cannot be identical');
-      return;
-    }
-
-    if (movementType === 'ADJUSTMENT' && reason === 'other-with-note' && !reference.trim()) {
-      setErrorMsg('A reference note is required when reason is "other-with-note"');
-      return;
+    // Client-side quick check against known available stock
+    if ((movementType === 'OUT' || movementType === 'TRANSFER') && availableStock !== null) {
+      const currentAvail = parseFloat(availableStock);
+      if (parsedQty > currentAvail) {
+        setErrorMsg(
+          `Insufficient stock: Cannot move ${parsedQty} units. Available balance is ${currentAvail} ${selectedProduct?.unit || ''}.`
+        );
+        return;
+      }
     }
 
     setSubmitting(true);
+    const operator = createdBy.trim() || 'warehouse_staff';
     try {
       let createdMovement;
       if (movementType === 'IN') {
@@ -121,7 +164,7 @@ export const RecordMovement: React.FC<RecordMovementProps> = ({
           quantity: parsedQty,
           unit_cost: parseFloat(unitCost) || 0,
           reference: reference.trim() || undefined,
-          created_by: createdBy.trim() || 'operator',
+          created_by: operator,
         });
       } else if (movementType === 'OUT') {
         createdMovement = await api.stockOut({
@@ -129,7 +172,7 @@ export const RecordMovement: React.FC<RecordMovementProps> = ({
           from_location_id: fromLocationId,
           quantity: parsedQty,
           reference: reference.trim() || undefined,
-          created_by: createdBy.trim() || 'operator',
+          created_by: operator,
         });
       } else if (movementType === 'TRANSFER') {
         createdMovement = await api.stockTransfer({
@@ -138,103 +181,103 @@ export const RecordMovement: React.FC<RecordMovementProps> = ({
           to_location_id: toLocationId,
           quantity: parsedQty,
           reference: reference.trim() || undefined,
-          created_by: createdBy.trim() || 'operator',
+          created_by: operator,
         });
       } else if (movementType === 'ADJUSTMENT') {
         createdMovement = await api.stockAdjust({
           product_id: productId,
           location_id: locationId,
           quantity: parsedQty,
-          reason,
+          reason: reason as AdjustmentReason,
           reference: reference.trim() || undefined,
-          created_by: createdBy.trim() || 'operator',
+          created_by: operator,
         });
       }
 
       setSuccessMsg(
-        `Movement #${createdMovement?.id} recorded successfully (${createdMovement?.movement_type}: ${formatQuantity(
+        `Movement #${createdMovement?.id} successfully recorded (${createdMovement?.movement_type}: ${formatQuantity(
           createdMovement?.quantity,
           selectedProduct?.unit
         )})`
       );
+      setProductId(0);
+      setFromLocationId(0);
+      setToLocationId(0);
+      setLocationId(0);
       setQuantity('');
+      setUnitCost('');
+      setReason('');
       setReference('');
-      onSuccess();
+      setAvailableStock(null);
+
+      if (onSuccess) onSuccess();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Transaction rejected by ledger rules');
+      setErrorMsg(err.message || 'Movement rejected by inventory ledger rules');
     } finally {
       setSubmitting(false);
     }
   };
 
-  return (
-    <div style={{ maxWidth: '780px', margin: '0 auto' }}>
-      <div className="panel">
-        <div className="panel-header">
-          <div className="panel-title">
-            <h3>Record Inventory Movement</h3>
-            <p>Append-only ledger transaction with real-time balance validation</p>
-          </div>
-        </div>
+  const handleTypeChange = (type: MovementType) => {
+    setMovementType(type);
+    setProductId(0);
+    setFromLocationId(0);
+    setToLocationId(0);
+    setLocationId(0);
+    setQuantity('');
+    setUnitCost('');
+    setReason('');
+    setReference('');
+    setAvailableStock(null);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+  };
 
-        {/* Movement Type Tabs */}
-        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border-subtle)', display: 'flex', gap: '0.5rem' }}>
+  return (
+    <div style={{ maxWidth: '680px', margin: '0 auto' }}>
+      <div className="page-header" style={{ marginBottom: '1.25rem' }}>
+        <div className="page-title">
+          <h1>Record Movement</h1>
+        </div>
+      </div>
+
+      <div className="card">
+        {/* Operation Type Switcher */}
+        <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--border)', display: 'flex', gap: '0.5rem', backgroundColor: '#f8fafc' }}>
           {(['IN', 'OUT', 'TRANSFER', 'ADJUSTMENT'] as MovementType[]).map((type) => {
             const isActive = movementType === type;
-            let activeClass = 'chip-in';
-            if (type === 'OUT') activeClass = 'chip-out';
-            if (type === 'TRANSFER') activeClass = 'chip-transfer';
-            if (type === 'ADJUSTMENT') activeClass = 'chip-adjust';
-
             return (
               <button
                 key={type}
                 type="button"
-                className={`btn ${isActive ? 'btn-primary' : 'btn-outline'}`}
-                style={{ flex: 1, padding: '0.65rem' }}
-                onClick={() => {
-                  setMovementType(type);
-                  setErrorMsg(null);
-                  setSuccessMsg(null);
-                }}
+                className={`btn ${isActive ? 'btn-primary' : ''}`}
+                style={{ flex: 1, height: '34px', fontSize: '0.8rem', justifyContent: 'center' }}
+                onClick={() => handleTypeChange(type)}
               >
-                <span className={`chip ${activeClass}`} style={{ marginRight: '0.25rem' }}>
-                  {type}
-                </span>
-                <span>
-                  {type === 'IN' && 'Receipt / Purchase'}
-                  {type === 'OUT' && 'Dispatch / Order'}
-                  {type === 'TRANSFER' && 'Bin Relocation'}
-                  {type === 'ADJUSTMENT' && 'Stock Audit'}
-                </span>
+                {type === 'IN' && 'Stock IN'}
+                {type === 'OUT' && 'Stock OUT'}
+                {type === 'TRANSFER' && 'TRANSFER'}
+                {type === 'ADJUSTMENT' && 'ADJUSTMENT'}
               </button>
             );
           })}
         </div>
 
         <form onSubmit={handleSubmit} style={{ padding: '1.5rem' }}>
-          {errorMsg && (
-            <div className="alert-banner alert-error">
-              <span>{errorMsg}</span>
-            </div>
-          )}
+          {errorMsg && <div className="alert alert-error">{errorMsg}</div>}
+          {successMsg && <div className="alert alert-success">{successMsg}</div>}
 
-          {successMsg && (
-            <div className="alert-banner alert-success">
-              <span>{successMsg}</span>
-            </div>
-          )}
-
-          {/* Product Select */}
+          {/* Product Selector */}
           <div className="form-group">
-            <label className="form-label">Catalog Product</label>
+            <label className="form-label">Product</label>
             <select
-              className="input-field"
+              className="select-input"
               style={{ width: '100%' }}
-              value={productId}
+              value={productId || ''}
               onChange={(e) => setProductId(Number(e.target.value))}
               required
             >
+              <option value="">Select Product</option>
               {products.map((p) => (
                 <option key={p.id} value={p.id}>
                   [{p.sku}] {p.name} ({p.unit})
@@ -243,20 +286,21 @@ export const RecordMovement: React.FC<RecordMovementProps> = ({
             </select>
           </div>
 
-          {/* Location Selectors depending on Type */}
+          {/* Locations according to movement type */}
           {movementType === 'IN' && (
             <div className="form-group">
-              <label className="form-label">Destination Storage Bin</label>
+              <label className="form-label">Destination Bin (To Location)</label>
               <select
-                className="input-field"
+                className="select-input"
                 style={{ width: '100%' }}
-                value={toLocationId}
+                value={toLocationId || ''}
                 onChange={(e) => setToLocationId(Number(e.target.value))}
                 required
               >
+                <option value=""> Select Destination Bin </option>
                 {locations.map((loc) => (
                   <option key={loc.id} value={loc.id}>
-                    [{loc.bin_code}] {loc.description}
+                    {loc.bin_code} — {loc.description}
                   </option>
                 ))}
               </select>
@@ -265,29 +309,25 @@ export const RecordMovement: React.FC<RecordMovementProps> = ({
 
           {movementType === 'OUT' && (
             <div className="form-group">
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
-                <label className="form-label" style={{ marginBottom: 0 }}>
-                  Source Storage Bin
-                </label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                <label className="form-label" style={{ marginBottom: 0 }}>Source Bin (From Location)</label>
                 {availableStock !== null && (
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    Available in bin:{' '}
-                    <strong className="mono" style={{ color: 'var(--text-main)' }}>
-                      {formatQuantity(availableStock, selectedProduct?.unit)}
-                    </strong>
+                  <span className="badge-balance">
+                    On-Hand: {loadingBalance ? '...' : `${formatQuantity(availableStock, selectedProduct?.unit)}`}
                   </span>
                 )}
               </div>
               <select
-                className="input-field"
+                className="select-input"
                 style={{ width: '100%' }}
-                value={fromLocationId}
+                value={fromLocationId || ''}
                 onChange={(e) => setFromLocationId(Number(e.target.value))}
                 required
               >
+                <option value=""> Select Source Bin </option>
                 {locations.map((loc) => (
                   <option key={loc.id} value={loc.id}>
-                    [{loc.bin_code}] {loc.description}
+                    {loc.bin_code} — {loc.description}
                   </option>
                 ))}
               </select>
@@ -295,48 +335,45 @@ export const RecordMovement: React.FC<RecordMovementProps> = ({
           )}
 
           {movementType === 'TRANSFER' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div className="form-row">
               <div className="form-group">
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
-                  <label className="form-label" style={{ marginBottom: 0 }}>
-                    From Bin
-                  </label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                  <label className="form-label" style={{ marginBottom: 0 }}>Source Bin (From)</label>
                   {availableStock !== null && (
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      Available:{' '}
-                      <strong className="mono" style={{ color: 'var(--text-main)' }}>
-                        {formatQuantity(availableStock, selectedProduct?.unit)}
-                      </strong>
+                    <span className="badge-balance">
+                      Available: {loadingBalance ? '...' : `${formatQuantity(availableStock, selectedProduct?.unit)}`}
                     </span>
                   )}
                 </div>
                 <select
-                  className="input-field"
+                  className="select-input"
                   style={{ width: '100%' }}
-                  value={fromLocationId}
+                  value={fromLocationId || ''}
                   onChange={(e) => setFromLocationId(Number(e.target.value))}
                   required
                 >
+                  <option value=""> Select Source Bin </option>
                   {locations.map((loc) => (
                     <option key={loc.id} value={loc.id}>
-                      [{loc.bin_code}] {loc.description}
+                      {loc.bin_code} ({loc.description})
                     </option>
                   ))}
                 </select>
               </div>
 
               <div className="form-group">
-                <label className="form-label">To Bin</label>
+                <label className="form-label">Destination Bin (To)</label>
                 <select
-                  className="input-field"
+                  className="select-input"
                   style={{ width: '100%' }}
-                  value={toLocationId}
+                  value={toLocationId || ''}
                   onChange={(e) => setToLocationId(Number(e.target.value))}
                   required
                 >
+                  <option value=""> Select Destination Bin </option>
                   {locations.map((loc) => (
                     <option key={loc.id} value={loc.id}>
-                      [{loc.bin_code}] {loc.description}
+                      {loc.bin_code} ({loc.description})
                     </option>
                   ))}
                 </select>
@@ -346,71 +383,73 @@ export const RecordMovement: React.FC<RecordMovementProps> = ({
 
           {movementType === 'ADJUSTMENT' && (
             <>
-              <div className="form-group">
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
-                  <label className="form-label" style={{ marginBottom: 0 }}>
-                    Storage Bin
-                  </label>
-                  {availableStock !== null && (
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      Current Bin Stock:{' '}
-                      <strong className="mono" style={{ color: 'var(--text-main)' }}>
-                        {formatQuantity(availableStock, selectedProduct?.unit)}
-                      </strong>
-                    </span>
-                  )}
+              <div className="form-row">
+                <div className="form-group">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                    <label className="form-label" style={{ marginBottom: 0 }}>Storage Location</label>
+                    {availableStock !== null && (
+                      <span className="badge-balance">
+                        Current: {loadingBalance ? '...' : `${formatQuantity(availableStock, selectedProduct?.unit)}`}
+                      </span>
+                    )}
+                  </div>
+                  <select
+                    className="select-input"
+                    style={{ width: '100%' }}
+                    value={locationId || ''}
+                    onChange={(e) => setLocationId(Number(e.target.value))}
+                    required
+                  >
+                    <option value=""> Select Storage Location </option>
+                    {locations.map((loc) => (
+                      <option key={loc.id} value={loc.id}>
+                        {loc.bin_code} — {loc.description}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                <select
-                  className="input-field"
-                  style={{ width: '100%' }}
-                  value={locationId}
-                  onChange={(e) => setLocationId(Number(e.target.value))}
-                  required
-                >
-                  {locations.map((loc) => (
-                    <option key={loc.id} value={loc.id}>
-                      [{loc.bin_code}] {loc.description}
-                    </option>
-                  ))}
-                </select>
-              </div>
 
-              <div className="form-group">
-                <label className="form-label">Reason Code (Mandatory)</label>
-                <select
-                  className="input-field"
-                  style={{ width: '100%' }}
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value as AdjustmentReason)}
-                  required
-                >
-                  <option value="damaged">damaged (Loss due to damaged inventory)</option>
-                  <option value="expired">expired (Loss due to shelf expiry)</option>
-                  <option value="count correction">count correction (Physical count delta)</option>
-                  <option value="theft">theft (Shrinkage / unexplainable loss)</option>
-                  <option value="other-with-note">other-with-note (Custom reason, note mandatory)</option>
-                </select>
+                <div className="form-group">
+                  <label className="form-label">Adjustment Reason</label>
+                  <select
+                    className="select-input"
+                    style={{ width: '100%' }}
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value as AdjustmentReason)}
+                    required
+                  >
+                    <option value=""> Select Adjustment Reason </option>
+                    <option value="damaged">Damaged Goods</option>
+                    <option value="expired">Expired Goods</option>
+                    <option value="count correction">Count Correction</option>
+                    <option value="theft">Theft / Shrinkage</option>
+                    <option value="other-with-note">Other (Requires Note)</option>
+                  </select>
+                </div>
               </div>
             </>
           )}
 
           {/* Quantity & Unit Cost */}
-          <div style={{ display: 'grid', gridTemplateColumns: movementType === 'IN' ? '1fr 1fr' : '1fr', gap: '1rem' }}>
+          <div className="form-row">
             <div className="form-group">
               <label className="form-label">
-                Quantity ({selectedProduct?.unit || 'units'})
+                Quantity {selectedProduct ? `(${selectedProduct.unit})` : ''}
                 {movementType === 'ADJUSTMENT' && (
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '0.5rem' }}>
-                    (Use positive for stock found, negative for loss)
+                  <span
+                    className="info-icon"
+                    title="Enter positive numbers (e.g. +5) to increase stock, or negative numbers (e.g. -2) to decrease stock."
+                  >
+                    <IconInfo size={13} />
                   </span>
                 )}
               </label>
               <input
                 type="number"
                 step="0.001"
-                className="input-field mono"
+                className="input-text"
                 style={{ width: '100%' }}
-                placeholder={movementType === 'ADJUSTMENT' ? '-2.000 or 5.000' : '10.000'}
+                placeholder={movementType === 'ADJUSTMENT' ? 'e.g. +5 or -2' : 'e.g. 10'}
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
                 required
@@ -419,14 +458,16 @@ export const RecordMovement: React.FC<RecordMovementProps> = ({
 
             {movementType === 'IN' && (
               <div className="form-group">
-                <label className="form-label">Unit Cost (INR ₹ / {selectedProduct?.unit})</label>
+                <label className="form-label">
+                  Purchase Unit Cost (₹)
+                </label>
                 <input
                   type="number"
                   step="0.01"
                   min="0"
-                  className="input-field mono"
+                  className="input-text"
                   style={{ width: '100%' }}
-                  placeholder="45.00"
+                  placeholder="e.g. 150.00"
                   value={unitCost}
                   onChange={(e) => setUnitCost(e.target.value)}
                   required
@@ -435,40 +476,69 @@ export const RecordMovement: React.FC<RecordMovementProps> = ({
             )}
           </div>
 
-          {/* Reference & Created By */}
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
+          {/* Reference & Operator */}
+          <div className="form-row">
             <div className="form-group">
               <label className="form-label">
-                Reference / Note {movementType === 'ADJUSTMENT' && reason === 'other-with-note' && <span style={{ color: 'var(--status-danger)' }}>*</span>}
+                Reference / Doc #
+                {movementType === 'ADJUSTMENT' && reason === 'other-with-note' && (
+                  <span style={{ color: 'var(--danger)', marginLeft: '0.2rem' }}>*</span>
+                )}
+                <span
+                  className="info-icon"
+                  title="External document identifier such as Purchase Order (PO), Vendor Invoice, Delivery Challan, or Incident Sheet."
+                >
+                  <IconInfo size={13} />
+                </span>
               </label>
               <input
                 type="text"
-                className="input-field"
+                className="input-text"
                 style={{ width: '100%' }}
-                placeholder="Invoice #, PO #, or reason explanation"
+                placeholder="e.g. PO-88392, INV-1002"
                 value={reference}
                 onChange={(e) => setReference(e.target.value)}
-                maxLength={100}
                 required={movementType === 'ADJUSTMENT' && reason === 'other-with-note'}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label">Operator Signature</label>
+              <label className="form-label">
+                Operator / Logged By
+                <span
+                  className="info-icon"
+                  title="Name or employee ID for the ledger audit trail. Defaults to 'warehouse_staff' if left blank."
+                >
+                  <IconInfo size={13} />
+                </span>
+              </label>
               <input
                 type="text"
-                className="input-field mono"
+                className="input-text"
                 style={{ width: '100%' }}
+                placeholder="Defaults to warehouse_staff"
                 value={createdBy}
                 onChange={(e) => setCreatedBy(e.target.value)}
-                required
               />
             </div>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
-            <button type="submit" className="btn btn-primary" disabled={submitting} style={{ padding: '0.65rem 1.5rem' }}>
-              {submitting ? 'Recording in Ledger...' : 'Commit Movement'}
+          <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={submitting}
+              style={{ minWidth: '160px', justifyContent: 'center' }}
+            >
+              {submitting
+                ? 'Recording...'
+                : movementType === 'IN'
+                  ? 'Post Stock In'
+                  : movementType === 'OUT'
+                    ? 'Post Stock Out'
+                    : movementType === 'TRANSFER'
+                      ? 'Post Transfer'
+                      : 'Post Adjustment'}
             </button>
           </div>
         </form>
