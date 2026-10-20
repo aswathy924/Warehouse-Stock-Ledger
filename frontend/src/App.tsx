@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { api } from './services/api';
 import { StockOverview } from './components/StockOverview';
 import { RecordMovement } from './components/RecordMovement';
+import { LedgerHistory } from './components/LedgerHistory';
 import './index.css';
 
 export type NavTab = 'grid' | 'movement' | 'ledger' | 'reports';
@@ -20,6 +21,7 @@ const getInitialTab = (): NavTab => {
 
 export function App() {
   const [activeTab, setActiveTab] = useState<NavTab>(getInitialTab);
+  const [ledgerProductId, setLedgerProductId] = useState<number | undefined>(undefined);
   const [isOnline, setIsOnline] = useState<boolean | null>(null);
 
   const handleTabChange = (tab: NavTab) => {
@@ -103,17 +105,18 @@ export function App() {
 
       {/* Main Content Area */}
       <main className="container">
-        {activeTab === 'grid' && <StockOverview />}
+        {activeTab === 'grid' && (
+          <StockOverview
+            onSelectProduct={(id) => {
+              setLedgerProductId(id);
+              handleTabChange('ledger');
+            }}
+          />
+        )}
 
         {activeTab === 'movement' && <RecordMovement />}
 
-        {activeTab === 'ledger' && (
-          <div className="card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-            <h2 style={{ fontSize: '1.1rem', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
-              Ledger History
-            </h2>
-          </div>
-        )}
+        {activeTab === 'ledger' && <LedgerHistory initialProductId={ledgerProductId} />}
 
         {activeTab === 'reports' && (
           <div className="card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
