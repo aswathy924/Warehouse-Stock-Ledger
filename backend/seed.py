@@ -37,11 +37,11 @@ def seed():
 
         print("Creating realistic warehouse locations...")
         locations_data = [
-            {"bin_code": "BIN-A01", "description": "Bulk Grain Pallet Rack A1"},
-            {"bin_code": "BIN-A02", "description": "Bulk Grain Pallet Rack A2"},
-            {"bin_code": "BIN-B01", "description": "Liquids & Oils Storage Bay B1"},
-            {"bin_code": "BIN-C01", "description": "Packaged Goods Shelf C1"},
-            {"bin_code": "BIN-STAGE", "description": "Loading Dock Staging Area"},
+            {"bin_code": "BIN-A01", "description": "Certified Seed Silo A1"},
+            {"bin_code": "BIN-A02", "description": "Climate-Controlled Seed Bay A2"},
+            {"bin_code": "BIN-B01", "description": "Liquid Bio-Inputs & Foliar Bay B1"},
+            {"bin_code": "BIN-C01", "description": "Organic Bio-Fertilizers Shelf C1"},
+            {"bin_code": "BIN-STAGE", "description": "Raithu Farm Dispatch Staging Bay"},
         ]
 
         loc_map = {}
@@ -53,13 +53,13 @@ def seed():
             loc_map[loc.bin_code] = loc
             print(f"  + Location [{loc.bin_code}] (ID: {loc.id}): {loc.description}")
 
-        print("\nCreating realistic distributor products...")
+        print("\nCreating realistic KJBN Labs (RAITHU) agritech products...")
         products_data = [
-            {"sku": "RICE-BASMATI-001", "name": "Royal Basmati Rice", "unit": "kg", "reorder_level": 50},
-            {"sku": "OIL-SUNFLOWER-001", "name": "Refined Sunflower Oil", "unit": "litre", "reorder_level": 30},
-            {"sku": "FLOUR-WHEAT-001", "name": "Stoneground Whole Wheat Atta", "unit": "kg", "reorder_level": 40},
-            {"sku": "SUGAR-CANE-001", "name": "Pure Cane White Sugar", "unit": "kg", "reorder_level": 25},
-            {"sku": "SALT-IODIZED-001", "name": "Refined Iodized Table Salt", "unit": "kg", "reorder_level": 15},
+            {"sku": "SEED-PADDY-BPT", "name": "BPT-5204 Samba Mahsuri Certified Paddy Seeds", "unit": "kg", "reorder_level": 50},
+            {"sku": "FERT-NEEM-BIO", "name": "Neem-Coated Organic Bio-Fertilizer", "unit": "kg", "reorder_level": 40},
+            {"sku": "NUTR-FOL-SPRAY", "name": "Micronutrient Liquid Foliar Spray", "unit": "litre", "reorder_level": 30},
+            {"sku": "PEST-TRIC-BIO", "name": "Trichoderma Viride Bio-Fungicide", "unit": "kg", "reorder_level": 25},
+            {"sku": "SEED-MAIZE-HYB", "name": "High-Yield Hybrid Maize Seeds", "unit": "kg", "reorder_level": 20},
         ]
 
         prod_map = {}
@@ -73,114 +73,114 @@ def seed():
 
         print("\nRecording initial stock movements (IN, TRANSFER, OUT, ADJUSTMENT)...")
 
-        # 1. Receive Basmati Rice: Batch 1 (100 kg @ 45.00)
+        # 1. Receive Paddy Seeds: Batch 1 (100 kg @ 45.00)
         movement_service.stock_in(
             StockInRequest(
-                product_id=prod_map["RICE-BASMATI-001"].id,
+                product_id=prod_map["SEED-PADDY-BPT"].id,
                 to_location_id=loc_map["BIN-A01"].id,
                 quantity=Decimal("100.000"),
                 unit_cost=Decimal("45.00"),
-                reference="INV-2026-001",
+                reference="INV-KJBN-2026-001",
                 created_by="warehouse_seed",
             ),
             db,
         )
 
-        # 2. Receive Basmati Rice: Batch 2 (100 kg @ 55.00) -> WAC becomes 50.00
+        # 2. Receive Paddy Seeds: Batch 2 (100 kg @ 55.00) -> WAC becomes 50.00
         movement_service.stock_in(
             StockInRequest(
-                product_id=prod_map["RICE-BASMATI-001"].id,
+                product_id=prod_map["SEED-PADDY-BPT"].id,
                 to_location_id=loc_map["BIN-A01"].id,
                 quantity=Decimal("100.000"),
                 unit_cost=Decimal("55.00"),
-                reference="INV-2026-002",
+                reference="INV-KJBN-2026-002",
                 created_by="warehouse_seed",
             ),
             db,
         )
 
-        # 3. Receive Sunflower Oil: 80 litres @ 110.00
+        # 3. Receive Foliar Spray: 80 litres @ 110.00
         movement_service.stock_in(
             StockInRequest(
-                product_id=prod_map["OIL-SUNFLOWER-001"].id,
+                product_id=prod_map["NUTR-FOL-SPRAY"].id,
                 to_location_id=loc_map["BIN-B01"].id,
                 quantity=Decimal("80.000"),
                 unit_cost=Decimal("110.00"),
-                reference="INV-2026-003",
+                reference="INV-KJBN-2026-003",
                 created_by="warehouse_seed",
             ),
             db,
         )
 
-        # 4. Receive Wheat Flour: 120 kg @ 35.00
+        # 4. Receive Neem Bio-Fertilizer: 120 kg @ 35.00
         movement_service.stock_in(
             StockInRequest(
-                product_id=prod_map["FLOUR-WHEAT-001"].id,
+                product_id=prod_map["FERT-NEEM-BIO"].id,
                 to_location_id=loc_map["BIN-A02"].id,
                 quantity=Decimal("120.000"),
                 unit_cost=Decimal("35.00"),
-                reference="INV-2026-004",
+                reference="INV-KJBN-2026-004",
                 created_by="warehouse_seed",
             ),
             db,
         )
 
-        # 5. Receive Sugar: 60 kg @ 42.00
+        # 5. Receive Bio-Fungicide: 60 kg @ 42.00
         movement_service.stock_in(
             StockInRequest(
-                product_id=prod_map["SUGAR-CANE-001"].id,
+                product_id=prod_map["PEST-TRIC-BIO"].id,
                 to_location_id=loc_map["BIN-C01"].id,
                 quantity=Decimal("60.000"),
                 unit_cost=Decimal("42.00"),
-                reference="INV-2026-005",
+                reference="INV-KJBN-2026-005",
                 created_by="warehouse_seed",
             ),
             db,
         )
 
-        # Note: Salt has 0 initial stock to test the Low-Stock Alert report!
+        # Note: SEED-MAIZE-HYB has 0 initial stock to test the Low-Stock Alert report!
 
-        # 6. Transfer 40 kg Rice from BIN-A01 to Staging BIN-STAGE
+        # 6. Transfer 40 kg Paddy Seeds from BIN-A01 to Staging BIN-STAGE
         movement_service.stock_transfer(
             StockTransferRequest(
-                product_id=prod_map["RICE-BASMATI-001"].id,
+                product_id=prod_map["SEED-PADDY-BPT"].id,
                 from_location_id=loc_map["BIN-A01"].id,
                 to_location_id=loc_map["BIN-STAGE"].id,
                 quantity=Decimal("40.000"),
-                reference="TRF-STAGE-01",
+                reference="TRF-RAITHU-01",
                 created_by="warehouse_seed",
             ),
             db,
         )
 
-        # 7. Dispatch 25 kg Rice from BIN-STAGE (Sales Order)
+        # 7. Dispatch 25 kg Paddy Seeds from BIN-STAGE to Farmer Producer Organization (FPO)
         movement_service.stock_out(
             StockOutRequest(
-                product_id=prod_map["RICE-BASMATI-001"].id,
+                product_id=prod_map["SEED-PADDY-BPT"].id,
                 from_location_id=loc_map["BIN-STAGE"].id,
                 quantity=Decimal("25.000"),
-                reference="SO-DELIV-001",
+                reference="DISPATCH-FPO-001",
                 created_by="warehouse_seed",
             ),
             db,
         )
 
-        # 8. Dispatch 15 litres Oil from BIN-B01
+        # 8. Dispatch 15 litres Foliar Spray from BIN-B01 for farm field distribution
         movement_service.stock_out(
             StockOutRequest(
-                product_id=prod_map["OIL-SUNFLOWER-001"].id,
+                product_id=prod_map["NUTR-FOL-SPRAY"].id,
                 from_location_id=loc_map["BIN-B01"].id,
                 quantity=Decimal("15.000"),
-                reference="SO-DELIV-002",
+                reference="DISPATCH-FPO-002",
                 created_by="warehouse_seed",
             ),
             db,
         )
 
-        # 9. Stock Adjustment: 1 kg Flour damaged by torn sack
+        # 9. Stock Adjustment: 1 kg Neem Bio-Fertilizer sack punctured during forklift handling
         movement_service.stock_adjustment(
             StockAdjustmentRequest(
-                product_id=prod_map["FLOUR-WHEAT-001"].id,
+                product_id=prod_map["FERT-NEEM-BIO"].id,
                 location_id=loc_map["BIN-A02"].id,
                 quantity=Decimal("-1.000"),
                 reason="damaged",
@@ -190,10 +190,10 @@ def seed():
             db,
         )
 
-        # 10. Stock Adjustment: Found 2 extra kg Sugar during count
+        # 10. Stock Adjustment: Physical count verified +2 kg Bio-Fungicide surplus
         movement_service.stock_adjustment(
             StockAdjustmentRequest(
-                product_id=prod_map["SUGAR-CANE-001"].id,
+                product_id=prod_map["PEST-TRIC-BIO"].id,
                 location_id=loc_map["BIN-C01"].id,
                 quantity=Decimal("2.000"),
                 reason="count correction",
