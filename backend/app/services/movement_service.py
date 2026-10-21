@@ -1,4 +1,5 @@
 from decimal import Decimal, ROUND_HALF_UP
+import threading
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,16 @@ from app.schemas.movement import (
     StockAdjustmentRequest,
     VALID_ADJUSTMENT_REASONS,
 )
+
+_product_locks: dict[int, threading.RLock] = {}
+_global_lock = threading.Lock()
+
+
+def get_product_lock(product_id: int) -> threading.RLock:
+    with _global_lock:
+        if product_id not in _product_locks:
+            _product_locks[product_id] = threading.RLock()
+        return _product_locks[product_id]
 
 
 def get_stock_balance(
@@ -132,42 +143,43 @@ def stock_out(
     data: StockOutRequest,
     db: Session,
 ) -> Movement:
-    product = db.execute(select(Product).where(Product.id == data.product_id).with_for_update()).scalar_one_or_none()
-    if product is None:
-        raise ValueError("Product not found")
+    with get_product_lock(data.product_id):
+        product = db.execute(select(Product).where(Product.id == data.product_id).with_for_update()).scalar_one_or_none()
+        if product is None:
+            raise ValueError("Product not found")
 
-    location = db.get(Location, data.from_location_id)
-    if location is None:
-        raise ValueError("Source location not found")
+        location = db.get(Location, data.from_location_id)
+        if location is None:
+            raise ValueError("Source location not found")
 
-    if data.quantity <= Decimal("0"):
-        raise ValueError("Quantity must be greater than zero")
+        if data.quantity <= Decimal("0"):
+            raise ValueError("Quantity must be greater than zero")
 
-    try:
-        balance = get_stock_balance(data.product_id, data.from_location_id, db)
-        if balance < data.quantity:
-            raise ValueError(f"Insufficient stock. Available: {balance}")
+        try:
+            balance = get_stock_balance(data.product_id, data.from_location_id, db)
+            if balance < data.quantity:
+                raise ValueError(f"Insufficient stock. Available: {balance}")
 
-        current_avg_cost = calculate_product_weighted_average_cost(data.product_id, db)
+            current_avg_cost = calculate_product_weighted_average_cost(data.product_id, db)
 
-        movement = Movement(
-            movement_type="OUT",
-            product_id=data.product_id,
-            from_location_id=data.from_location_id,
-            to_location_id=None,
-            quantity=data.quantity,
-            unit_cost=current_avg_cost,
-            reference=data.reference,
-            created_by=data.created_by,
-        )
+            movement = Movement(
+                movement_type="OUT",
+                product_id=data.product_id,
+                from_location_id=data.from_location_id,
+                to_location_id=None,
+                quantity=data.quantity,
+                unit_cost=current_avg_cost,
+                reference=data.reference,
+                created_by=data.created_by,
+            )
 
-        db.add(movement)
-        db.commit()
-        db.refresh(movement)
-        return movement
-    except Exception:
-        db.rollback()
-        raise
+            db.add(movement)
+            db.commit()
+            db.refresh(movement)
+            return movement
+        except Exception:
+            db.rollback()
+            raise
 
 
 def stock_transfer(
