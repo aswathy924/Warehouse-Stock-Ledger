@@ -4,6 +4,7 @@ import type { StockOverviewGridItem, Location } from '../types';
 import { formatCurrencyINR, formatQuantity } from '../utils/formatters';
 import { ClickToCopy } from './ClickToCopy';
 import { Pagination } from './Pagination';
+import { exportToCSV } from '../utils/csvExport';
 
 interface StockOverviewProps {
   onSelectProduct?: (productId: number) => void;
@@ -229,6 +230,31 @@ export const StockOverview: React.FC<StockOverviewProps> = ({ onSelectProduct })
     0
   );
 
+  const handleExportCSV = () => {
+    const headers = [
+      'SKU',
+      'Product Name',
+      'Bin Code',
+      'Location Description',
+      'On-Hand Quantity',
+      'Unit',
+      'Unit Cost (INR)',
+      'Total Value (INR)',
+    ];
+    const rows = sortedItems.map((item) => [
+      item.sku,
+      item.product_name,
+      item.bin_code,
+      item.location_description,
+      item.quantity,
+      item.unit,
+      item.unit_cost,
+      item.total_value,
+    ]);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    exportToCSV(`warehouse_stock_matrix_${dateStr}.csv`, headers, rows);
+  };
+
   const renderSortIndicator = (key: SortKey) => {
     const isActive = sortKey === key;
     return (
@@ -292,6 +318,20 @@ export const StockOverview: React.FC<StockOverviewProps> = ({ onSelectProduct })
               Clear All
             </button>
           )}
+
+          <button
+            className="btn"
+            onClick={handleExportCSV}
+            disabled={loading || sortedItems.length === 0}
+            title="Export filtered stock records to CSV"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Export CSV
+          </button>
 
           <button className="btn" onClick={loadData} disabled={loading}>
             Refresh

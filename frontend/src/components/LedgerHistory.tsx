@@ -4,6 +4,7 @@ import type { Product, Location, Movement } from '../types';
 import { formatISTDateTime, formatCurrencyINR, formatQuantity } from '../utils/formatters';
 import { ClickToCopy } from './ClickToCopy';
 import { Pagination } from './Pagination';
+import { exportToCSV } from '../utils/csvExport';
 
 interface LedgerHistoryProps {
   initialProductId?: number;
@@ -146,6 +147,57 @@ export const LedgerHistory: React.FC<LedgerHistoryProps> = ({ initialProductId }
       ? filteredMovements
       : filteredMovements.slice((safePage - 1) * pageSize, safePage * pageSize);
 
+  const handleExportCSV = () => {
+    const headers = [
+      'Movement ID',
+      'Timestamp (IST)',
+      'SKU',
+      'Product Name',
+      'Movement Type',
+      'From Location',
+      'To Location',
+      'Quantity',
+      'Unit Cost (INR)',
+      'Running Balance',
+      'Reference / Invoice',
+      'Reason / Notes',
+      'Operator',
+      'Status',
+    ];
+    const rows = filteredMovements.map((m) => {
+      const prod = productMap.get(m.product_id);
+      const fromLoc = m.from_location_id ? locationMap.get(m.from_location_id) : null;
+      const toLoc = m.to_location_id ? locationMap.get(m.to_location_id) : null;
+      const runningBal = runningBalanceMap.get(m.id);
+      const statusStr = m.is_reversed
+        ? 'Reversed'
+        : m.reverses_movement_id
+          ? `Compensating Reversal (of #${m.reverses_movement_id})`
+          : 'Active';
+
+      return [
+        m.id,
+        formatISTDateTime(m.created_at),
+        prod?.sku || '',
+        prod?.name || '',
+        m.movement_type,
+        fromLoc ? `${fromLoc.bin_code} (${fromLoc.description})` : 'EXTERNAL / NONE',
+        toLoc ? `${toLoc.bin_code} (${toLoc.description})` : 'DISPATCHED / NONE',
+        m.quantity,
+        m.unit_cost !== null && m.unit_cost !== undefined ? m.unit_cost : '',
+        runningBal !== undefined ? runningBal : '',
+        m.reference || '',
+        m.reason || '',
+        m.created_by || '',
+        statusStr,
+      ];
+    });
+
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const prodPart = selectedProduct ? `_${selectedProduct.sku}` : '_all';
+    exportToCSV(`warehouse_ledger_history${prodPart}_${dateStr}.csv`, headers, rows);
+  };
+
   const handleExecuteReversal = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reversingMovement) return;
@@ -248,6 +300,20 @@ export const LedgerHistory: React.FC<LedgerHistoryProps> = ({ initialProductId }
               </button>
             )}
           </div>
+
+          <button
+            className="btn"
+            onClick={handleExportCSV}
+            disabled={loading || filteredMovements.length === 0}
+            title="Export filtered ledger records to CSV"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Export CSV
+          </button>
 
           <button
             className="btn"
