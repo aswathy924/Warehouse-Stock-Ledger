@@ -59,7 +59,13 @@ export function App() {
         await api.checkHealth();
         setIsOnline(true);
       } catch {
-        setIsOnline(false);
+        // Fallback: If /health is blocked by client-side adblockers (e.g. Brave Shields),
+        try {
+          await api.getLocations();
+          setIsOnline(true);
+        } catch {
+          setIsOnline(false);
+        }
       }
     };
     checkHealth();
